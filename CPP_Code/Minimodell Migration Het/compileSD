@@ -1,0 +1,3 @@
+#!/bin/bash
+
+g++ SourceSD/main.cpp SourceSD/species.cpp SourceSD/foodweb.cpp SourceSD/controller.cpp SourceSD/output.cpp SourceSD/eval.cpp -lm -lgsl -lgslcblas -O3 -o workingSD

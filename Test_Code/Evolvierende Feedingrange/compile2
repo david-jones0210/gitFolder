@@ -1,0 +1,3 @@
+#!/bin/bash
+
+g++ Source2/main.cpp Source2/species.cpp Source2/foodweb.cpp Source2/controller.cpp Source2/output.cpp Source2/eval.cpp Source2/statictester.cpp -lm -lgsl -lgslcblas -O3 -o working2

@@ -1,0 +1,30 @@
+// StaticTester Klasse
+#ifndef STATICTESTER_H
+#define STATICTESTER_H
+
+#include <iostream>
+#include "foodweb.h"
+
+using namespace std;
+
+
+class StaticTester
+{
+public:
+  StaticTester();				//constructor
+  StaticTester(Foodweb* _web);			//constructor, der init aufruft.
+  ~StaticTester();				//destructor
+  
+  void init();			// initialisiert den Tester
+  Species* test_species(int bmIndex, int preyStartIndex, int preyCount, double x, double c, double d);
+  
+private:
+  double* predator_mass;  		// Length = number of species
+  double* prey_intervals; 		// Length = 2 * number of species
+  int* pred_count; 			// Length = 2 * number of species + 1
+  Foodweb* web;
+  int web_dim;
+
+};
+
+#endif

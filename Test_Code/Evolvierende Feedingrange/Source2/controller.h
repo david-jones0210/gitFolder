@@ -1,0 +1,54 @@
+// Controller Klasse
+#ifndef CONTROLLER_H
+#define CONTROLLER_H
+
+#include "species.h"
+#include "foodweb.h"
+#include "output.h"
+#include <gsl/gsl_rng.h>
+
+class Controller
+{
+private:
+  double x;				//Struktur-/Levelparameter x
+  double c;				//Konkurrenzparameter c
+  double d;				//Sterbeparameter d
+  int t;				//Zeit
+  Species** global_species;		//Liste aller insgesamt lebenden Species
+  int* species_count;			//Liste, auf wie vielen patches die Spezies gerade existiert
+  int species_pos;			//Position, an der man vermutlich als nächstes eine neue Spezies einfügen könnte
+  int maxS;				//Maximal mögliche Gesamtspeziesanzahl (incl. Resource)
+  int S;				//Aktuelle (global-)Speziesanzahl (incl. einer Resource, die in auf global_species[0] liegen soll)
+  Foodweb* web;				//Das Nahrungsnetz
+  //Für die räumliche Erweiterung auf mehreren Patches könnte man folgende Struktur benutzen: _space_
+  //Foodweb** web_list;
+  //Foodweb*** neighbor_webs;
+  //int* neighbor_count;
+  //int web_count, max_neighbors, ... und ähnliches
+  gsl_rng *r;
+  
+
+public:
+  Controller();				//constructor
+  ~Controller();			//destructor, gibt den Speicherplatz frei
+  void init(int seed, int patches = 1, int scenario = 0, int maximum_species = 1023);	//Initialisiert den Controller: Alloziiert speicher, setzt resource und ein netz damit,
+										//initialisiert den Zufallszahlengenerator
+  //Getter und Setter:
+  void set_x(double _x){x = _x;};
+  double get_x(){return x;};
+  void set_c(double _c){c = _c;};
+  double get_c(){return c;};
+  void set_d(double _d){d = _d;};
+  double get_d(){return d;};
+  int get_t(){return t;};
+  
+  bool mutate(bool&);			//Erstellt einen Mutanten und setzt diesen ins Nahrungsnetz, falls er überleben könnte. Gibt true zurück, falls der Mutant erfolgreich ins Netz gesetzt wurde
+  int die();				//Lässt Spezies aussterben, gibt ggf. entsprechende Speicherbereiche frei und gibt die Anzahl der gestorbenen Spezies zurück.
+  void migrate();//TODO
+  void print(Output* out);		//Ruft die print-Funktionen der einzelnen Foodwebs auf und gibt globale Eigenschaften über output aus.
+  
+
+
+};
+
+#endif

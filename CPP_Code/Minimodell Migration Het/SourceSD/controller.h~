@@ -1,0 +1,79 @@
+// Controller Klasse
+#ifndef CONTROLLER_H
+#define CONTROLLER_H
+
+#include "species.h"
+#include "foodweb.h"
+#include "output.h"
+#include <gsl/gsl_rng.h>
+
+class Controller
+{
+private:
+  double x;				//Struktur-/Levelparameter x
+  double c;				//Konkurrenzparameter c
+  double d;				//Sterbeparameter d
+  double mig_prop;			//Verhältnis von Migrationen zu Mutationen; mig_prop : 1
+  long long t;				//Zeit
+  Species** global_species;		//Liste aller insgesamt lebenden Species
+  int* species_count;			//Liste, auf wie vielen patches die Spezies gerade existiert
+  int species_pos;			//Position, an der man vermutlich als nächstes eine neue Spezies einfügen könnte
+  int maxS;				//Maximal mögliche Gesamtspeziesanzahl (incl. Resource)
+  int S;				//Aktuelle (global-)Speziesanzahl (incl. einer Resource, die auf global_species[0] liegen soll)
+  //Für die räumliche Erweiterung auf mehreren Patches könnte man folgende Struktur benutzen: _space_
+  int patches;				//Anzahl der Patches
+  Foodweb** webs;			//Die Nahrungsnetze
+  int** neighbour_ids;			//ids der Nachbarnetze (Reihenfolge: nord-ost-süd-west)
+  int*** species_spread_matrix;		//Gibt an, ob die Spezies auf benachbarten patches bereits existiert (Reihenfolge: nord-ost-süd-west)
+  
+  int target_web_id;			//Netz in das Migration/in dem Mutation stattfindet
+  int chosen_id;			//Nächste(r) Mutter/Migrant
+  bool migration_possible;		//Prüft, ob mindestens eine Spezies existiert, die nicht auf allen Nahrungsnetzen existiert
+  int counter_all_webs;			//Zählt, wie oft die Migration fehlschlägt, weil die Spezies auf allen Netzen existiert.
+  int counter_inbound;			//Zählt, wie oft die Migration fehlschlägt, weil eine Spezies nach innen migriert. Wird auch erhöht, wenn eine Spezies ausgewählt wurde, die auf allen Patches existiert.
+  int success_migration;		//Zählt die Anzahl erfolgreicher Migrationen
+  int success_mutation;			//Zählt die Anzahl erfolgreicher Mutationen
+  double feedingrange_min;		//Setzt die minimale Feedingrange eines Mutanten.
+  double feedingrange_var;		//Variiert die Feedingrange eines Mutanten um maximal diesen Wert nach oben.
+  gsl_rng *r;
+  
+  
+  
+
+public:
+  Controller();				//constructor
+  ~Controller();			//destructor, gibt den Speicherplatz frei
+  void init(int seed, int columns = 1, int rows = 1, double migration_proportion = 1000.0, double custom_feedingrange_min = 0.0, double custom_feedingrange_var = 0.0, int scenario = 0, int maximum_species = 4095);	//Initialisiert den Controller: Alloziiert speicher, setzt Resource und Netze damit,
+										//initialisiert den Zufallszahlengenerator
+  //Getter und Setter:
+  void set_x(double _x){x = _x;};
+  double get_x(){return x;};
+  void set_c(double _c){c = _c;};
+  double get_c(){return c;};
+  void set_d(double _d){d = _d;};
+  double get_d(){return d;};
+  int get_t(){return t;};
+  int get_success_migration(){return success_migration;};
+  int get_success_mutation(){return success_mutation;};
+  
+  int get_counter_all_webs(){return counter_all_webs;};
+  int get_counter_inbound(){return counter_inbound;};
+    
+  bool mutate();					//Erstellt einen Mutanten und setzt diesen ins Nahrungsnetz, falls er überleben könnte. Gibt true zurück, falls der Mutant erfolgreich ins Netz gesetzt wurde
+  bool migrate(); 					//Migriert eine Spezies in ein angrenzendes Netz
+  int die(Output* out);						//Lässt Spezies aussterben, gibt ggf. entsprechende Speicherbereiche frei und gibt die Anzahl der gestorbenen Spezies zurück.
+  
+  bool find_mother_and_mothernet();			//Gibt an welche Spezies in welchem Netz mutiert. Kann keine Spezies mutieren, wird false zurückgegeben.
+  bool find_migrant_and_target_web();			//Gibt an welche Spezies in welches Netz migriert. Kann keine Spezies migrieren, wird false zurückgegeben.
+  
+  bool migration_or_mutation();				//Wählt entsprechend mig_prop eine Migration oder Mutation aus und führt diese durch
+  
+  void print(Output* out);				//Ruft die print-Funktionen der einzelnen Foodwebs auf und gibt globale Eigenschaften über output aus.
+  
+  void clean_up(Output* out);				//Räumt auf; ruft remove_species für alle Spezies in allen Netzen auf.
+  
+
+
+};
+
+#endif

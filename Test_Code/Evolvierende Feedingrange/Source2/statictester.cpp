@@ -1,0 +1,199 @@
+#include "statictester.h"
+
+StaticTester::StaticTester() : predator_mass(NULL), prey_intervals(NULL), pred_count(NULL)
+{
+  return;
+}
+
+StaticTester::StaticTester(Foodweb* _web) : web(_web)
+{
+  init();
+  return;
+}
+
+StaticTester::~StaticTester()
+{
+  if(predator_mass)
+    delete[] predator_mass;
+  if(prey_intervals)
+    delete[] prey_intervals;
+  if(pred_count)
+    delete pred_count;
+  return;
+}
+
+
+// Sortiert die passenden werte in die Arrays
+void StaticTester::init()
+{
+  web_dim = web->get_dimension();
+  predator_mass = new double[web_dim];
+  prey_intervals = new double[2*web_dim];
+  pred_count = new int[2*web_dim+1];
+  
+  for(int i = 0; i < web_dim; i++)
+  {
+    predator_mass[i] = 1.0e20;
+  }
+  
+  for(int i = 0; i < web_dim; i++)
+  {
+    double m = web->get_species(i)->biomass;
+    int j = web_dim-1;
+    while(j > 0)
+    {
+      if(m > predator_mass[j-1])
+	break;
+      predator_mass[j] = predator_mass[j-1];
+      j--;
+    }
+    predator_mass[j] = m;
+  }
+  
+  for(int i = 0; i < 2*web_dim; i++)
+  {
+    prey_intervals[i] = 1.0e20;
+    pred_count[i] = 0;
+  }
+  pred_count[2*web_dim] = 0;
+  
+  for(int i = 0; i < web_dim; i++)
+  {
+    double m2 = web->get_species(i)->feedingcenter + web->get_species(i)->feedingrange;
+    double m1 = web->get_species(i)->feedingcenter - web->get_species(i)->feedingrange;
+    int j = 2*web_dim-1;
+    while(j > 1)
+    {
+      if(m2 > prey_intervals[j-2])
+	break;
+      prey_intervals[j] = prey_intervals[j-2];
+      j--;
+    }
+    prey_intervals[j] = m2;
+    j--;
+    while(j > 0)
+    {
+      if(m1 > prey_intervals[j-1])
+	break;
+      prey_intervals[j] = prey_intervals[j-1];
+      j--;
+    }
+    prey_intervals[j] = m1;
+  }
+  
+  for(int i = 0; i < web_dim; i++)
+  {
+    double m2 = web->get_species(i)->feedingcenter + web->get_species(i)->feedingrange;
+    double m1 = web->get_species(i)->feedingcenter - web->get_species(i)->feedingrange;
+    int j = 0;
+    while(m1 > prey_intervals[j])
+    {
+      j++;
+    }
+    while(m2 > prey_intervals[j])
+    {
+      j++;
+      pred_count[j]++;
+    }
+  }
+  
+  cout << web_dim << endl;
+  cout << "bm: ";
+  for(int i = 0; i < web_dim; i++)
+  {
+    cout << "\t" << predator_mass[i];
+  }
+  cout << endl;
+  cout << "int: ";
+    for(int i = 0; i < 2*web_dim; i++)
+  {
+    cout << "\t" << prey_intervals[i];
+  }
+  cout << endl;
+  cout << "pred:";
+    for(int i = 0; i < 2*web_dim; i++)
+  {
+    cout << "\t" << pred_count[i];
+  }
+  cout << endl;
+  
+  
+}
+
+Species* StaticTester::test_species(int bmIndex, int preyStartIndex, int preyCount, double x, double c, double d)
+{
+  web->calculate(x, c, d);
+  
+  //Mutanten testweise kreieren:
+  double mutant_bm;
+  double mutant_preyStart;
+  double mutant_preyEnd;
+  if(bmIndex == 0)
+  {
+    mutant_bm = prey_intervals[bmIndex] - 0.5;
+  }
+  else if(bmIndex == 2*web_dim)
+  {
+    mutant_bm = prey_intervals[bmIndex - 1] + 0.5;
+  }
+  else
+  {
+    mutant_bm = 0.5 * (prey_intervals[bmIndex - 1] + prey_intervals[bmIndex]);
+  }
+  
+  if(preyStartIndex == 0)
+  {
+    mutant_preyStart = predator_mass[preyStartIndex] - 0.5;
+  }
+  else if (preyStartIndex >= web_dim)
+  {
+    cout << "Fehler: (1) StaticTester::test_species(int bmIndex, int preyStartIndex, int preyCount)" << endl;
+  }
+  else
+  {
+    mutant_preyStart = 0.5 * (predator_mass[preyStartIndex] + predator_mass[preyStartIndex - 1]);
+  }
+  
+  if(preyCount + preyStartIndex == web_dim)
+  {
+    mutant_preyEnd = predator_mass[web_dim - 1] + 0.5;
+  }
+  else if(preyCount + preyStartIndex  > web_dim)
+  {
+    cout << "Fehler: (2) StaticTester::test_species(int bmIndex, int preyStartIndex, int preyCount)" << endl;
+  }
+  else
+  {
+    mutant_preyEnd = 0.5 * (predator_mass[preyCount + preyStartIndex] + predator_mass[preyCount + preyStartIndex - 1]);
+  }
+  
+  Species* mutant = new Species(mutant_bm, 0.5*(mutant_preyStart + mutant_preyEnd), mutant_preyEnd - mutant_preyStart);
+
+  
+  // Update-Regel: Hat der Mutant was zu fressen?
+  if(web->get_prey_count(mutant) == 0)
+  {
+    //Mutant nicht lebensfähig:
+    delete mutant;
+    return NULL;
+  }
+  // Update-Regel: Ist der Mutant lebensfähig? surv(Mutant) > 1?
+  // Zum Netz hinzufügen:
+  int mutant_index = web->add_species(mutant);
+  if(mutant_index < 0) // Fehler aus Foodweb!
+  {
+    cout << "Fehler: (3) StaticTester::test_species(int bmIndex, int preyStartIndex, int preyCount)" << endl;
+  }
+  web->calculate(x, c, d);
+  if(web->get_survival(mutant_index) < 1.0)
+  {
+    //Mutant könnte nicht überleben:
+    web->remove_species(mutant_index);
+    delete mutant;
+    return NULL;
+  }
+  
+  //Spezies ist (zunächst) lebensfähig:
+  web->remove_species(mutant_index);
+  return mutant;
+}

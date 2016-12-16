@@ -1,0 +1,288 @@
+#include "controller.h"
+#include "statictester.h"
+#include <iostream>
+#include <math.h>
+
+using namespace std;
+
+Controller::Controller() : x(0.1), c(0.1), d(0.0001), t(0)
+{
+  return;
+}
+
+Controller::~Controller()
+{
+  delete web;
+  for(int i = 0; i < maxS; i++)
+  {
+    if(species_count[i] > 0)
+      delete global_species[i];
+  }
+  delete[] global_species;
+  delete[] species_count;
+  gsl_rng_free(r);	
+  return;
+}
+
+void Controller::init(int seed, int patches, int scenario, int maximum_species)
+{
+  //Random Number Generator initialisieren:
+  const gsl_rng_type *T;						
+  gsl_rng_env_setup();   			
+  T = gsl_rng_default;   		// default random number generator (so called mt19937)
+  gsl_rng_default_seed = seed;		// Startwert fuer den RNG
+  r = gsl_rng_alloc(T);
+  
+  maxS = maximum_species + 1;
+  
+  //Speicher für spezies reservieren:
+  global_species = new Species*[maxS];
+  species_count = new int[maxS];
+  for(int i = 0; i < maxS; i++)
+  {
+    global_species[i] = NULL;
+    species_count[i] = 0;
+  }
+  
+  //Resource und erste Spezies erstellen:
+  S = 2;
+  species_count[0] = 1;
+  global_species[0] = new Species(0.0, 0.0, 0.0);
+  global_species[0]->set_index(0);
+  species_count[1] = 1;
+  global_species[1] = new Species(2.0, 0.0, 0.5);
+  global_species[1]->set_index(1);
+  species_pos = 2;
+  
+  //Nahrungsnetz erstellen:
+  web = new Foodweb();
+  web->init(global_species[0], 0, 1023);
+  web->add_species(global_species[1]);
+
+}
+
+bool Controller::mutate(bool& info)
+{
+  t++;
+  
+  // _space_ Mutternetz bestimmen.
+  
+  web->calculate(x, c, d);
+  // Mutter auswählen:
+  if(web->get_dimension() < 2)
+  {
+    cout << "Controller::mutate() - Fehler: Keine Mutterspezies im Nahrungsnetz" << endl;
+    cout << "t = " << t << endl;
+    t *= 2;
+    return false;
+  }
+  //Mutationswk. ist proportional zu bm ^-0.25
+  double sumsum = 0.0;
+  for(int i = 1; i < web->get_dimension(); i++)
+  {
+    sumsum += pow(10.0, -0.25*web->get_species(i)->biomass);
+  }
+  sumsum *= gsl_rng_uniform(r);
+  int mother_index = web->get_dimension();
+  while(sumsum > 0.0)
+  {
+    mother_index--;
+    sumsum -= pow(10.0, -0.25*web->get_species(mother_index)->biomass);
+  }
+  //cout << "Mutter: " << mother_index << endl;
+  
+  //Alle mutieren mit gleicher Wk:
+  //int mother_index = gsl_rng_uniform(r) * (web->get_dimension() - 1.0);
+  //mother_index++; //Resource kann nicht mutieren
+  
+  
+  //Mutieren:
+  double mutant_bm = web->get_species(mother_index)->biomass + 2.0*log10(5.0/*2.0*/)*(gsl_rng_uniform(r)-0.5);
+  double mutant_fr = web->get_species(mother_index)->feedingrange+(0.5*(gsl_rng_uniform(r)-0.5));
+  double mutant_fc = mutant_bm - 1.0 - 2.0*gsl_rng_uniform(r);
+  
+  
+  if (mutant_bm - mutant_fc - 2.0 < mutant_fr)	// Verhindert, dass Fressbereich zu größeren Spezies geht.
+    mutant_fr = mutant_fc - 2.0;
+  if (mutant_fr < 0)				// Verhindert, dass fr < 0 wird
+    mutant_fr=0.01;
+  
+  if (web-> get_dimension() > 10 && info)
+  {
+    cout << " bm: " << mutant_bm << " fc: " << mutant_fc << " fr: " << mutant_fr << endl;
+    info = false;
+  }
+  Species* mutant = new Species(mutant_bm, mutant_fc , mutant_fr);// + 0.5*gsl_rng_uniform(r));
+
+  
+  // Update-Regel: Hat der Mutant was zu fressen?
+  if(web->get_prey_count(mutant) == 0)
+  {
+    //Mutant nicht lebensfähig:
+    delete mutant;
+    return false;
+  }
+  // Update-Regel: Ist der Mutant lebensfähig? surv(Mutant) > 1?
+  // Zum Netz hinzufügen:
+  int mutant_index = web->add_species(mutant);
+  if(mutant_index < 0) // Fehler aus Foodweb!
+  {
+    t *= 2;
+    mutant_index = 0;
+  }
+  web->calculate(x, c, d);
+  if(web->get_survival(mutant_index) < 1.0)
+  {
+    //Mutant könnte nicht überleben:
+    web->remove_species(mutant_index);
+    delete mutant;
+    return false;
+  }
+  
+  //Spezies ist (zunächst) lebensfähig:
+  
+  //Wo kann die neue Spezies gespeichert werden?
+  bool ok = true;
+  if(species_pos == maxS)
+  {
+    species_pos = 0;
+    ok = false;
+  }
+  while(species_count[species_pos] != 0)
+  {
+    species_pos++;
+    if(species_pos == maxS)
+    {
+      species_pos = 0;
+      if(ok)
+      {
+	ok = false;
+      }
+      else
+      {
+	cout << "Controller::mutate() - Fehler: Maximale globale Speziesanzahl (" << maxS << ") überschritten!" << endl;
+	t *= 2;
+	web->remove_species(mutant_index);
+	delete mutant;
+	return false;
+      }
+    }
+  }
+  mutant->set_index(species_pos);
+  global_species[species_pos] = mutant;
+  species_count[species_pos] = 1;
+  S++;
+  species_pos++;
+  return true;
+}
+
+int Controller::die() 
+{
+  web->calculate(x, c, d);
+  int old_dim = web->get_dimension();
+  
+  //Neue Variante: Alle mit der minimalen fitness, die kleiner als 1 sein muss, sterben gleichzeitig
+  double min1_fitness = 1.0;
+  double min2_fitness = 1.0;
+  for(int i = 1; i < web->get_dimension(); i++) // Resource zählt nicht
+  {
+    if(web->get_survival(i) < min1_fitness)
+    {
+      min2_fitness = min1_fitness;
+      min1_fitness = web->get_survival(i);
+    }
+    else if(web->get_survival(i) < min2_fitness)
+    {
+      if(web->get_survival(i) > min1_fitness)
+	min2_fitness = web->get_survival(i);
+    }
+  }
+//   for(int i = 0; i < web->get_dimension(); i++)
+//   {
+//     cout << web->get_TL(i) << "\t";
+//   }
+//   cout << endl;
+  
+  //cout << "threshold: " << min1_fitness << " : " << min2_fitness << endl;
+  
+  //Zufällige Spezies wählen unter den schwächsten, die stirbt
+  int die_index = 0;
+  for(int i = 1; i < web->get_dimension(); i++)
+  {
+    if(web->get_survival(i) < (min1_fitness+min2_fitness)/2.0)
+    {
+      die_index++;
+      //web->remove_species(i);
+      //break;
+    }
+  }
+  die_index *= gsl_rng_uniform(r);
+  for(int i = 1; i < web->get_dimension(); i++)
+  {
+    if(web->get_survival(i) < (min1_fitness+min2_fitness)/2.0)
+    {
+      die_index--;
+      if(die_index < 0)
+      {
+	web->remove_species(i);
+	break;
+      }
+    }
+  }
+  
+  
+//  web->remove_species_fitness((min1_fitness+min2_fitness)/2.0);   // Mittlere Variante: alle mit der minimalen Fitness sterben gleichzeitig
+//  int extinct_count = web->remove_species_fitness();  // Alte Variante: alle mit fitness < 1.0 sterben gleichzeitig
+  
+  for(int i = web->get_dimension(); i < old_dim; i++)
+  {
+    int pos = web->get_species(i)->get_index();
+    species_count[pos]--;
+    if(species_count[pos] == 0)
+    {
+      //Spezies lebt in keinem Nahrungsnetz mehr:
+      delete global_species[pos];
+      S--;
+      global_species[pos] = NULL;
+    }
+  }
+//  cout << t << " : " << web->get_dimension() << endl;
+  
+//   for(int i = 0; i < web->get_dimension(); i++)
+//   {
+//     cout << web->get_species(i)->biomass << "\t";
+//   }
+//   cout << endl;
+  return old_dim - web->get_dimension();
+}
+
+
+void Controller::print(Output* out)
+{
+  //_space_ out->print_line(Output::OUT_BM, S, t, -1, maxS, (void*)global_species);
+  //_space_ out->print_line(Output::OUT_C, S, t, -1, maxS, (void*)global_species);
+  //_space_ out->print_line(Output::OUT_S, S, t, -1, maxS, (void*)global_species);
+  web->calculate(x, c, d);
+  web->print(out, t);
+  // StaticTester st(web);
+  // if(t == 4)
+  // {
+  //   int d = web->get_dimension();
+  //   for(int i = 0; i <= 2*d; i++)
+  //   {
+  //     for(int j = 1; j < d; j++)
+  //     {
+  // 	for(int k = 0; j+k <= d; k++)
+  // 	{
+  // 	  //if(st.test_species(i, k, j, x, c, d) != NULL)
+  // 	  {
+  // 	    cout << i << " : " << j << " : " << k << endl;
+  // 	  }
+  // 	}
+  //     }
+  //   }
+  // }
+  
+}
+
+

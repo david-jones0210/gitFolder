@@ -1,0 +1,3 @@
+#!/bin/bash
+
+g++ TestCPP.cpp -o workingSD

@@ -1,0 +1,610 @@
+#include "controller.h"
+#include <iostream>
+#include <math.h>
+
+using namespace std;
+
+Controller::Controller() : x(0.1), c(0.1), d(0.0001), t(0)
+{
+  return;
+}
+
+Controller::~Controller()
+{
+  delete webs;
+  for(int i = 0; i < maxS; i++)
+  {
+    if(species_count[i] > 0)
+      delete global_species[i];
+  }
+  delete[] global_species;
+  delete[] species_count;
+  gsl_rng_free(r);	
+  return;
+}
+
+void Controller::init(int seed, int columns, int rows, double migration_proportion, double custom_feedingrange, int scenario, int maximum_species)
+{
+  counter_all_webs = 0;
+  counter_inbound = 0;
+  success_mutation = 0;
+  success_migration = 0;
+  migration_possible = true;
+  patches = columns*rows;		//Anzahl der Patches bestimmen
+  
+  //Random Number Generator initialisieren:
+  const gsl_rng_type *T;						
+  gsl_rng_env_setup();   			
+  T = gsl_rng_default;   		// default random number generator (so called mt19937)
+  gsl_rng_default_seed = seed;		// Startwert fuer den RNG
+  r = gsl_rng_alloc(T);
+    
+  maxS = maximum_species + 1;
+  
+  mig_prop = migration_proportion;
+  
+  feedingrange_min = custom_feedingrange_min;
+  
+  feedingrange_var = custom_feedingrange_var;
+  
+  target_web_id = -1;
+  chosen_id = -1;
+  
+  //Speicher für spezies reservieren:
+  global_species = new Species*[maxS];
+  species_count = new int[maxS];
+  species_spread_matrix = new int**[maxS];
+  
+  for(int i = 0; i < maxS; i++)
+  {
+    global_species[i] = NULL;
+    species_count[i] = 0;
+    species_spread_matrix[i] = new int*[patches];
+    for(int j = 0; j < patches; j++)
+      {
+	species_spread_matrix[i][j] = new int[4];
+	for(int k = 0; k < 4; k++)
+	  species_spread_matrix[i][j][k] = -1;
+      }
+  }
+  
+  //Resource und erste Spezies erstellen:
+  S = 2;
+  species_count[0] = patches;
+  global_species[0] = new Species(0.0, 0.0, 0.0);
+  global_species[0]->set_index(0);
+  for(int j = 0; j < patches; j++)
+      for(int k = 0; k < 4; k++)
+	  species_spread_matrix[0][j][k] = 0;
+  species_count[1] = patches;
+  global_species[1] = new Species(2.0, 0.0, 0.5);
+  global_species[1]->set_index(1);
+  for(int j = 0; j < patches; j++)
+      for(int k = 0; k < 4; k++)
+	  species_spread_matrix[1][j][k] = 0;
+  species_pos = 2;
+  
+    
+  //Nahrungsnetze erstellen:
+  webs = new Foodweb*[patches];
+  neighbour_ids = new int*[patches];
+  for(int i = 0; i < patches; i++)
+  {
+    webs[i] = new Foodweb();
+    webs[i]->init(global_species[0], i, 63);
+        
+    webs[i]->add_species(global_species[1], 0);
+       
+    neighbour_ids[i] = new int[4];				//Nachbarnetze bei Rasteraufbau
+    neighbour_ids[i][0] = (i + patches - columns) % patches;		//nördliches Netz
+    if((i + 1) % columns == 0)					//östliches Netz
+      neighbour_ids[i][1] = (i + patches + 1 - columns) % patches;		//wenn am östlichen Rand
+    else  
+      neighbour_ids[i][1] = (i + 1) % patches;
+    neighbour_ids[i][2] = (i + columns) % patches;		//südliches Netz
+    if(i % columns == 0)					//westliches Netz
+      neighbour_ids[i][3] = (i + patches - 1 + columns) % patches;		//wenn am westlichen Rand
+    else  
+      neighbour_ids[i][3] = (i + patches - 1) % patches;
+       
+    
+  }
+   
+}
+
+bool Controller::mutate()
+{
+  webs[target_web_id]->calculate(x, c, d);
+  
+  //Fehler abfangen
+  if(webs[target_web_id]->get_dimension() < 2)
+  {
+    cout << "Controller::mutate(" << target_web_id << ") - Fehler: Keine Mutterspezies im Nahrungsnetz " << endl;
+    cout << "t = " << t << endl;
+    t *= 2;
+    return false;
+  }
+  
+  
+  //Mutieren:
+  double mutant_bm = global_species[chosen_id]->biomass + 2.0*log10(5.0/*2.0*/)*(gsl_rng_uniform(r)-0.5);
+  Species* mutant = new Species(mutant_bm, mutant_bm - 1.0 - 2.0*gsl_rng_uniform(r), feedingrange_min + feedingrange_var*gsl_rng_uniform(r));
+
+  
+  // Update-Regel: Hat der Mutant was zu fressen?
+  if(webs[target_web_id]->get_prey_count(mutant) == 0)
+  {
+    //Mutant nicht lebensfähig:
+    delete mutant;
+    //cout << "Mutant nicht lebensfähig" << endl;
+    return false;
+  }
+  // Update-Regel: Ist der Mutant lebensfähig? surv(Mutant) > 1?
+  // Zum Netz hinzufügen:
+  int mutant_index = webs[target_web_id]->add_species(mutant,t);
+  //cout << t << " : target_web_id: " << target_web_id << endl;
+  //cout << t << " : webs_size: " << webs[target_web_id]->get_dimension() << endl;
+  if(mutant_index < 0) // Fehler aus Foodweb!
+  {
+    t *= 2;
+    mutant_index = 0;
+  }
+ 
+  webs[target_web_id]->calculate(x, c, d);
+  if(webs[target_web_id]->get_survival(mutant_index) < 1.0)
+  {
+    //Mutant könnte nicht überleben:
+    webs[target_web_id]->remove_species(mutant_index);
+    delete mutant;
+    //cout << "Mutant nicht überlebensfähig" << endl;
+    return false;
+  }
+  
+  //Spezies ist (zunächst) lebensfähig:
+  
+  //Wo kann die neue Spezies gespeichert werden?
+  
+  
+  bool ok = true;
+  if(species_pos == maxS)
+  {
+    species_pos = 0;
+    ok = false;
+  }
+  while(species_count[species_pos] != 0)
+  {
+    species_pos++;
+    if(species_pos == maxS)
+    {
+      species_pos = 0;
+      if(ok)
+      {
+	ok = false;
+      }
+      else
+      {
+	cout << t << " : Controller::mutate() - Fehler: Maximale globale Speziesanzahl (" << maxS << ") überschritten!" << endl;
+	t = 1000*t+1000;
+	webs[target_web_id]->remove_species(mutant_index);
+	delete mutant;
+	return false;
+      }
+    }
+  }
+  
+  mutant->set_index(species_pos);
+
+  global_species[species_pos] = mutant;
+  species_count[species_pos] = 1;
+  for(int i = 0; i < 4; i++)
+    species_spread_matrix[species_pos][target_web_id][i] = 1;
+  S++;
+  species_pos++;
+
+  return true;
+}
+
+bool Controller::migrate()
+{
+  webs[target_web_id]->calculate(x, c, d);
+    
+  //Fehler abfangen
+  if(webs[target_web_id]->get_dimension() < 2)
+  {
+    cout << "Controller::migrate(" << target_web_id << ") - Fehler: Keine Migrantenspezies im Nahrungsnetz " << endl;
+    cout << "t = " << t << endl;
+    t *= 2;
+    return false;
+  }
+    
+  //Migrant erstellen
+  Species* migrant = global_species[chosen_id];
+  
+      
+  // Update-Regel: Hat der Migrant was zu fressen?
+  if(webs[target_web_id]->get_prey_count(migrant) == 0)
+  {
+    //Migrant nicht lebensfähig:
+    return false;
+  }
+  // Update-Regel: Ist der Migrant lebensfähig? surv(Migrant) > 1?
+  // Zum Netz hinzufügen:
+  int new_migrant_index = webs[target_web_id]->add_species(migrant,t);
+  
+  if(new_migrant_index < 0) // Fehler aus Foodweb!
+  {
+    t *= 2;
+    new_migrant_index = 0;
+    cout << t << " : migrate() - Fehler aus Foodweb!" << endl;
+  }
+  
+  
+  webs[target_web_id]->calculate(x, c, d);
+  
+  if(webs[target_web_id]->get_survival(new_migrant_index) < 1.0)
+  {
+    //Migrant könnte nicht überleben:
+    webs[target_web_id]->remove_species(new_migrant_index);
+    return false;
+  }
+  
+
+  
+  
+  //Spezies ist (zunächst) lebensfähig:
+  
+  //Anpassen des species_count und der spread_Matrix im Zielnetz und allen angrenzenden Netzen
+  species_count[chosen_id]++;
+  
+  //cout << "Migration" << endl;
+  
+  for(int i = 0; i < 4; i++)
+  {
+    //cout << "Migration: " << i << endl;
+    //cout << "neighbour_ids[target_web_id][i]: " << neighbour_ids[target_web_id][i] << endl; 
+    if (species_spread_matrix[chosen_id][neighbour_ids[target_web_id][i]][0] == -1) 	//sobald eine der vier Richtungen -1 ist, müssen alle -1 sein
+      species_spread_matrix[chosen_id][target_web_id][i] = 1;
+    else
+    {
+      species_spread_matrix[chosen_id][target_web_id][i] = 0;
+      species_spread_matrix[chosen_id][neighbour_ids[target_web_id][i]][(i + 2) % 4] = 0;
+    }
+  }
+  
+    
+  return true;
+}
+
+int Controller::die(Output* out) 
+{
+  
+ 
+  if(target_web_id < 0)
+  {
+    cout << "ctrl->die() trotz target_web_id < 0" << endl;
+    t = 100*t+100;
+    return 0;
+  }
+  
+  webs[target_web_id]->calculate(x, c, d);
+  int old_dim = webs[target_web_id]->get_dimension();
+ 
+  double min1_fitness = 1.0; // Kleinste Fitness
+  double min2_fitness = 1.0; // Zweitkleinste Fitness
+  for(int i = 1; i < webs[target_web_id]->get_dimension(); i++) // Resource zählt nicht; Finde kleinste und zweitkleinste Fitness
+  {
+    if(webs[target_web_id]->get_survival(i) < min1_fitness)
+    {
+      min2_fitness = min1_fitness;
+      min1_fitness = webs[target_web_id]->get_survival(i);
+    }
+    else if(webs[target_web_id]->get_survival(i) < min2_fitness)
+    {
+      if(webs[target_web_id]->get_survival(i) > min1_fitness)
+	min2_fitness = webs[target_web_id]->get_survival(i);
+    }
+  }
+  
+ 
+  
+  //Wenn mehrere Spezies gleich schwach, dann zufällige Spezies aus diesen wählen
+  int die_index = 0;
+  int removed_species_index = -1;
+  for(int i = 1; i < webs[target_web_id]->get_dimension(); i++)
+  {
+    if(webs[target_web_id]->get_survival(i) < (min1_fitness+min2_fitness)/2.0)
+    {
+      die_index++;
+    }
+  }
+  //if(min1_fitness < 1)
+    //cout << t << " : real_die_index = " << die_index << endl;
+  die_index *= gsl_rng_uniform(r);
+  //if(min1_fitness < 1)
+    //cout << t << " : real_die_index = " << die_index << endl;
+  
+  for(int i = 1; i < webs[target_web_id]->get_dimension(); i++)
+  {
+    if(webs[target_web_id]->get_survival(i) < (min1_fitness+min2_fitness)/2.0)
+    {
+      die_index--;
+      if(die_index < 0)
+      {
+	
+	removed_species_index = webs[target_web_id]->get_species(i)->get_index();
+	webs[target_web_id]->remove_species(i, t, out);
+	break;
+      }
+    }
+  }
+  
+  
+  
+  if(removed_species_index > -1)
+  {
+    species_count[removed_species_index]--; 			//Spezies lebt auf einem Netz weniger
+    for(int j = 0; j < 4; j++)			//mögliche Migrationsrichtungen anpassen
+    {
+      species_spread_matrix[removed_species_index][target_web_id][j] = -1;
+      if(species_spread_matrix[removed_species_index][neighbour_ids[target_web_id][j]][0] != -1)		//sobald eine der vier Richtungen ungleich -1 ist, müssen alle ungleich -1 sein
+	species_spread_matrix[removed_species_index][neighbour_ids[target_web_id][j]][(j + 2) % 4] = 1;
+    }
+    
+    if(species_count[removed_species_index] == 0)	//Spezies lebt in keinem Nahrungsnetz mehr:
+    {
+      delete global_species[removed_species_index];
+      S--;
+      global_species[removed_species_index] = NULL;
+    }
+  }
+  
+  return old_dim - webs[target_web_id]->get_dimension();	//gibt die Anzahl der ausgestorbenen Spezies zurück,
+								//stirbt also keine aus wird 0 zurückgegeben
+}
+
+bool Controller::find_mother_and_mothernet()
+{
+  chosen_id = -1;
+  target_web_id = -1;
+  
+  
+  
+  //Finde Mutter
+  //int weights = new int[maxS];		//Gewichte, entsprechen nach aktueller Methode species_count
+  int sum1 = 0; 
+  int sum2 = 0;
+  for(int i = 1; i < maxS; i++)			//i = 1, da die Ressource nicht mutieren kann
+    if(species_count[i] > 0)
+      sum1+= species_count[i];
+
+  sum1 *=gsl_rng_uniform(r);
+  
+  for(int i = 1; i < maxS; i++)
+  {
+    if(species_count[i] > 0)
+      sum2+= species_count[i];
+    if(sum1 < sum2)
+    {
+      chosen_id = i;				//Gewählte Mutter
+      break;
+    }
+  }
+  
+  if(chosen_id < 0){			//Gibt false zurück, wenn kein Mutant gefunden wurde
+    cout << t << " : mut: sum1: " << sum1 << endl;
+    return false;
+  }
+  
+  //Finde Mutternetz
+  sum1 = 0; 
+  sum2 = 0;
+  
+  
+  for(int i = 0; i < patches; i++)
+    if(species_spread_matrix[chosen_id][i][0] != -1)
+      sum1++;
+    
+ 
+  sum1 *=gsl_rng_uniform(r);
+  
+  for(int i = 0; i < patches; i++)
+  {
+    if(species_spread_matrix[chosen_id][i][0] != -1)
+      sum2++;
+        
+    if(sum1 < sum2)
+    {
+      target_web_id = i;			//Gewähltes Mutternetz
+      break;
+    }
+  }
+  
+  if(target_web_id < 0){				//Gibt false zurück, wenn kein Mutternetz gefunden wurde
+    cout << t << " : mut: chosen_id: " << chosen_id << endl;
+    cout << t << " : mut: target_web_id: " << target_web_id << endl;
+    cout << t << " : mut: sum1: " << sum1 << endl;
+    return false;
+  }
+  //cout << "mut: chosen_id: " << chosen_id << endl;
+  //cout << "mut: target_web_id: " << target_web_id << endl;
+  
+  return true;
+  
+  
+}
+
+bool Controller::find_migrant_and_target_web()
+{
+  chosen_id = -1;
+  target_web_id = -1;
+  
+  int direction = -1;
+  int motherweb_id = -1;
+  
+  
+  //Finde Migrant
+  //int weights = new int[maxS];		//Gewichte, entsprechen nach aktueller Methode species_count
+  int sum1 = 0; 
+  int sum2 = 0;
+  for(int i = 1; i < maxS; i++)			//i = 1, da die Ressource nicht migrieren kann
+    if(species_count[i] > 0)		//keine Spezies auswählen, die schon auf allen Patches ist
+      sum1+= species_count[i];
+
+  sum1 *=gsl_rng_uniform(r);
+  
+  for(int i = 1; i < maxS; i++)
+  {
+    if(species_count[i] > 0)
+      sum2+= species_count[i];
+    if(sum1 < sum2)
+    {
+      chosen_id = i;				//Gewählter Migrant
+      break;
+    }
+  }
+  
+  //sum1 = sum2 = 0, wenn nur Spezies existieren, die auf allen Patches
+  //existieren => Migration unmöglich und chosen_id < 0, in diesem Fall
+  //muss der Zeitschritt rückgängig gemacht werden
+  
+  if(species_count[chosen_id] == patches){				//Gibt false zurück, wenn kein Migrant gefunden wurde
+    counter_all_webs++;
+    counter_inbound++;
+    return false;
+  }
+  
+  if(chosen_id < 0){				//Gibt false zurück, wenn kein Migrant gefunden wurde
+    cout << t << " : Fehler in find_migrant_and_target_web: Finde Migrant." << endl;
+    t = 1000*t+1000;
+    return false;
+  }
+  
+  //Finde Mutternetz
+  sum1 = 0; 
+  sum2 = 0;
+  
+  for(int i = 0; i < patches; i++)				//i und j gleich 1 ?! Muss schon 0 sein! ERR
+    for(int j = 0; j < 4; j++)
+      if(species_spread_matrix[chosen_id][i][j] > -1)
+      {
+	sum1++;
+	break;
+      }
+
+  sum1 *=gsl_rng_uniform(r);
+  
+  for(int i = 0; i < patches; i++)
+  {
+    for(int j = 0; j < 4; j++)
+      if(species_spread_matrix[chosen_id][i][j] > -1)
+      {
+	sum2++;							//sum1++ ?! Muss schon sum2++ sein! ERR
+	break;
+      }
+    if(sum1 < sum2)
+    {
+      motherweb_id = i;				//Gewähltes Mutternetz
+      break;
+    }
+  }
+  
+  if(motherweb_id < 0)				//Gibt false zurück, wenn kein Mutternetz gefunden wurde
+    return false;
+  
+  
+  //Finde Richtung
+  direction = 4*gsl_rng_uniform(r);  
+    
+  if(species_spread_matrix[chosen_id][motherweb_id][direction] < 1)				//Gibt false zurück, wenn keine Richtung gefunden wurde
+  {
+    counter_inbound++;
+    return false;
+  }
+  
+  //Finde Zielnetz
+  target_web_id = neighbour_ids[motherweb_id][direction];	//Gewähltes Zielnetz
+  
+  //cout << "mig: chosen_id: " << chosen_id << endl;
+  //cout << "mig: target_web_id: " << target_web_id << endl;
+  
+  return true;
+}
+
+bool Controller::migration_or_mutation()
+{
+  t++;	//Zeitschritt auch bei fehlgeschlagener Mutation/Migration machen (nur nicht bei unmöglicher Migration)
+	//siehe dazu find_migrant_and_target_web()
+  
+  if(((mig_prop + 1.0)*gsl_rng_uniform(r) < mig_prop) && migration_possible)
+  {
+     
+    if(!find_migrant_and_target_web())
+    {
+      return false;
+    }
+
+      
+    if(!migrate())
+    {
+      return false;
+    }
+    success_migration++;
+    
+  } else
+  {
+
+       
+    if(!find_mother_and_mothernet())
+    {
+      cout << "Fehler in find_mother_and_mothernet()" << endl;
+      t = 100*t+100;
+      return false;
+    }
+        
+    if(!mutate())
+    {
+      return false;
+    }
+    
+    success_mutation++;   
+    
+  }
+  
+  migration_possible = true;
+  //t++;  //Zeitschritt nur machen, wenn tatsächlich eine Mutation/Migration durchgeführt wurde und somit ein
+	//Aussterbeprozess und eine Ausgabe initiiert wurden
+  
+  
+  return true; 
+}
+
+
+void Controller::print(Output* out)
+{
+  
+  if(target_web_id < 0)
+  {
+    cout << "ctrl->print(out) trotz target_web_id < 0" << endl;
+    t = 100*t+100;
+    return;
+  }
+  //_space_ out->print_line(Output::OUT_BM, S, t, -1, maxS, (void*)global_species);
+  //_space_ out->print_line(Output::OUT_C, S, t, -1, maxS, (void*)global_species);
+  //_space_ out->print_line(Output::OUT_S, S, t, -1, maxS, (void*)global_species);
+  webs[target_web_id]->calculate(x, c, d);
+  webs[target_web_id]->print(out, t);
+  
+   
+}
+
+void Controller::clean_up(Output* out)
+{
+  
+  for(int i = 0; i < patches; i++)				//i und j gleich 1 ?! Muss schon 0 sein! ERR
+    for(int j = webs[i]->get_dimension()-1; j > -1; j--)	//auch Ressource wird entfernt!
+      webs[i]->remove_species(j, t, out);
+  
+   
+}
+
+

@@ -1,0 +1,92 @@
+#include <iostream>      
+#include <cstdlib>
+#include <ctime>
+#include "species.h"
+#include "foodweb.h"
+#include "controller.h"
+#include "output.h"
+
+
+using namespace std;
+
+
+
+int main(int argc, char** argv)
+{
+  if(argc != 7)
+  {
+    cout << "Falsche Parameteranzahl! Aufruf mit:" << endl << "./working ausgabeordner seed x c d runtime" << endl;
+    return 0;
+  }
+  char* path = argv[1];
+  int seed = atoi(argv[2]);
+  double x = atof(argv[3])/1e6;
+  double c = atof(argv[4])/1e6;
+  double d = atof(argv[5])/1e6;
+  int runtime = atoi(argv[6]);
+  
+  const int scenario = 2*3*5*7;
+  
+  time_t start_time = clock();
+  time_t timer = clock();
+  cout << "Programmstart mit Parametern:" << endl;
+  cout << "path = " << path << endl;
+  cout << "seed = " << seed << endl;
+  cout << "x = " << x << " | c = " << c << " | d = " << d << endl;
+  cout << "runtime = " << runtime << endl;
+  
+  Output* out = new Output();
+  
+  out->open_files(path);
+  /*
+  out->mute(Output::OUT_S);
+  out->mute(Output::OUT_ALPHA);
+  
+  out->mute(Output::OUT_BM);
+  out->mute(Output::OUT_C);
+  out->mute(Output::OUT_TROPOS);
+  out->mute(Output::OUT_TROPHDISTRI);
+  */
+  
+
+  Controller* ctrl = new Controller();
+  ctrl->init(seed);
+  ctrl->set_x(x);
+  ctrl->set_c(c);
+  ctrl->set_d(d);
+  
+  bool info = true;
+  
+  while(ctrl->get_t() < runtime)
+  {
+    ctrl->mutate(info);
+    while(ctrl->die()) continue;
+    ctrl->print(out);
+
+    if((double)(clock()-timer)/CLOCKS_PER_SEC > 60.0)
+    {
+      if((double)(clock()-start_time)/CLOCKS_PER_SEC < 3660.0)
+      {
+	timer = clock();
+	cout << "t = " << ctrl->get_t() << " (" << (double)(clock()-start_time)/CLOCKS_PER_SEC << " s)" << endl;
+      }
+      else if((double)(clock()-timer)/CLOCKS_PER_SEC > 1800.0)
+      {
+	timer = clock();
+	cout << "t = " << ctrl->get_t() << " (" << ((double)(clock()-start_time)/CLOCKS_PER_SEC)/3600.0 << " h)" << endl;
+      }
+    }
+  }
+  
+  delete ctrl;
+  
+  
+  out->write_params(path, scenario, seed, x, c, d);
+  out->close_files();
+  
+  cout << "Programmende! Laufzeit: " << (double)(clock()-start_time)/CLOCKS_PER_SEC << " s" << endl;
+  
+  delete out;
+  
+  return 0;                                        
+}
