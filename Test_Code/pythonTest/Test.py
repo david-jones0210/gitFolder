@@ -13,11 +13,8 @@ import resource
 
 print 'program started...'
 
-f_read = open("testfile.txt")
-f_lines = []
-time_stamp = 20
-
-ModulesAreaLaws.filter_list_for_timestamp(time_stamp, f_read, f_lines)
+f_read = open("/local.work/jones/testfile.txt")
+f_lines = f_read.readlines()
 
 print f_lines
 print resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
