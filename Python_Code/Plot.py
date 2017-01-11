@@ -5,92 +5,14 @@ import array
 import numpy as np
 import matplotlib.pyplot as plt
 
-def loaddata(folder, filename, maxlen, start = 0, end = -1):
-  filename = "./" + folder + "/" + filename
-  f = open(filename, "r")
-      
-  S = []
-  time = []
-  patch = []
-  values = []
+data = [[1, 30], [5, 88], [13, 157], [25, 231], [41, 334], [61, 429], [85, 550], [113, 661], [145, 789], [181, 942], [221, 1116], [265, 1330], [313, 1500], [365, 1710], [421, 1937], [481, 2186], [545, 2423], [613, 2705], [685, 3017], [761, 3335], [841, 3666], [925, 4006], [1013, 4376], [1105, 4746], [1201, 5113], [1301, 5507], [1405, 5900], [1513, 6314], [1625, 6758], [1741, 7215], [1861, 7691], [1985, 8159], [2113, 8667], [2245, 9141], [2381, 9695], [2521, 10215], [2665, 10777], [2813, 11337], [2965, 11922], [3121, 12492], [3281, 13075], [3445, 13691], [3613, 14313], [3785, 14901], [3961, 15551], [4141, 16217], [4325, 16892], [4513, 17588], [4705, 18297], [4901, 18997], [5099, 19646], [5295, 20336], [5487, 21008], [5675, 21631], [5859, 22242], [6039, 22843], [6215, 23456], [6387, 24035], [6555, 24620], [6719, 25141], [6879, 25726], [7035, 26254], [7187, 26788], [7335, 27282], [7479, 27766], [7619, 28257], [7755, 28724], [7887, 29179], [8015, 29605], [8139, 29965], [8259, 30349], [8375, 30780], [8487, 31167], [8595, 31553], [8699, 31901], [8799, 32234], [8895, 32553], [8987, 32833], [9075, 33115], [9159, 33395], [9239, 33652], [9315, 33896], [9387, 34150], [9455, 34391], [9519, 34609], [9579, 34793], [9635, 34953], [9687, 35126], [9735, 35268], [9779, 35406], [9819, 35540], [9855, 35658], [9887, 35766], [9915, 35847], [9939, 35918], [9959, 35976], [9975, 36008], [9987, 36035], [9995, 36051], [9999, 36058], [10000, 36060]]
+x = []
+y = []
 
-  for line in f:
-    data = line.split("\t")
-    ss = int(data[0])
-    S.append(ss)
-    time.append(data[1])
-    patch.append(data[2])
-    varr = []
-    for i in xrange(3, len(data)):
-      varr.append(data[i])
-    values.append(varr)
-  f.close()
-  
-  del S[end:]
-  del time[end:]
-  del patch[end:]
-  del values[end:]
-  
-  del S[:start]
-  del time[:start]
-  del patch[:start]
-  del values[:start]
-  
-  while len(time) > maxlen:
-    del S[::2]
-    del time[::2]
-    del patch[::2]
-    del values[::2]
-    
-  return (S, time, patch, values)
-  
-# -------------------- mm_bm.out data (dim, t, patch, bm) --------------------
-
-f = "Output"
-dim, t, patch, bm = loaddata(f, "mm_bm.out", 100000, 0, 100000)
-
-  #print "loading done"
-
-  #plt.plot(t, dim, "b.")
-
-  #plt.title("dim ueber t")
-  #plt.savefig("t_dim"+f+".pdf");
-  #plt.savefig("t_dim"+f+".png");
-  #plt.show()
-
-
-  #parameter (z.B. x) ist in der Ausgabedatei durchgefahren und wird geplottet.
-  #for i in xrange(30):
-  #plt.plot(t[1000*i:1000*(i+1)], dim[1000*i:1000*(i+1)], color = (i/30.0,0.2,1.0-i/30.0))
-
-
-for i in xrange(max(dim)):
-  plt.plot(t, [bm[j][i] if len(bm[j]) > i else 0 for j in xrange(len(bm))], "b,")
-
-plt.title("bm ueber t")
-plt.savefig("Output2/bm_ueber_t_"+f+".pdf")
-plt.savefig("Output2/bm_ueber_t_"+f+".png")
+for val in data:
+	x.append(val[1])
+	y.append(val[2])
+	
+plt.plot(x, y)
 plt.show()
-  
-# -------------------- mm_tropos.out data (dim, t, patch, tl) --------------------
-
-
-  #for i in xrange(max(dim)):
-    #plt.plot(t, [tl[j][i] if len(tl[j]) > i else 0 for j in xrange(len(tl))], "r.")
-
-  #plt.title("tl ueber t")
-  #plt.savefig("TestFolder/tl_ueber_t_"+f+".pdf")
-  #plt.savefig("TestFolder/tl_ueber_t_"+f+".png")
-  #plt.show()
-  
-# -------------------- mm_trophdistri.out data (dim, t, patch, tl) --------------------
-
-  #f = "TestFolder"
-  #dim, t, patch, td = loaddata(f, "mm_trophdistri.out", 10000, 0, 10000)
-
-  #for i in range(0,len(td)): <--- funktioniert nur für td[i][0,1,2] bzw immer dann, wenn von anfang an das array der trophischen level gefüllt ist, muss noch bearbeitet werden.
-    #plt.plot(t[i], [td[i][2]], "r.")
-
-  #plt.title("td ueber t")
-  #plt.savefig("TestFolder/td_ueber_t_"+f+".pdf")
-  #plt.show()
+	
