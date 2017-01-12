@@ -2,6 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 
+name = "SAL_Het1_Run4_58533500"
+
 arr = []
 string = " "
 switch = 0
@@ -28,24 +30,24 @@ for val in arr:
     else:
         ydata.append(np.log10(val))
         count = 0        
-print xdata
-print ydata
 
 def function(x, a, b):
     return a * x + b
 
-xFitData = xdata[0:8]
-yFitData = ydata[0:8]
+xFitData = xdata
+yFitData = ydata
 
 popt, pcov = curve_fit(function, xFitData, yFitData)
 y = []
 for x in xFitData:
     y.append(function(x, popt[0], popt[1]))
 
-plt.plot(xdata[0:8], ydata[0:8], 'bo')
-plt.plot(xFitData, y, 'r')
-plt.show()
+plotData, = plt.plot(xdata, ydata, 'bo')
+plotFit, = plt.plot(xFitData, y, 'r', label = 'fit function: f(x) = %s * x + %s' %(popt[0], popt[1]))
+plt.legend(handles = [plotFit], loc = 'bottom', fontsize = 'small')
+plt.savefig(name + '_fitPlot.png')
 
-print xdata[1:8]
-print popt[0], popt[1]
-print pcov
+fwrite = open(name + "_fit_params.txt", 'a')
+fwrite.write("fit function: f(x) = %s * x + %s\n" %(popt[0], popt[1]))
+fwrite.write("kovarianzmatrix:\n %s" %pcov)
+fwrite.close()
